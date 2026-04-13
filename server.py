@@ -110,49 +110,16 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/open-terminal":
             body = self.read_body()
             data = json.loads(body)
-            directory = data.get("dir", str(Path.home()))
 
-            # Expand ~ if present
-            directory = str(Path(directory).expanduser())
-
-            if not Path(directory).is_dir():
-                self.send_json({"error": "directory not found"}, 400)
+            cmd = data.get("cmd", "").strip()
+            if not cmd:
+                self.send_json({"error": "missing cmd"}, 400)
                 return
 
-            # Try Alacritty IPC (opens new tab/window in existing instance)
-            # Falls back to spawning a new Alacritty window
-            try:
-                result = subprocess.run(
-                    [
-                        "alacritty",
-                        "msg",
-                        "create-window",
-                        "--working-directory",
-                        directory,
-                        "--",
-                        "zsh",
-                        "-c",
-                        "claude; exec zsh",
-                    ],
-                    capture_output=True,
-                    timeout=5,
-                )
-                if result.returncode != 0:
-                    raise RuntimeError("IPC failed")
-            except Exception:
-                # Fallback: spawn a fresh Alacritty window
-                subprocess.Popen(
-                    [
-                        "alacritty",
-                        "--working-directory",
-                        directory,
-                        "-e",
-                        "zsh",
-                        "-c",
-                        "claude; exec zsh",
-                    ]
-                )
+            # Expand ~ in the command string
+            cmd = cmd.replace("~", str(Path.home()))
 
+            subprocess.Popen(cmd, shell=True)
             self.send_json({"ok": True})
 
         else:
