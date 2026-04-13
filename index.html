@@ -221,6 +221,13 @@
           <p id="plans-status" class="text-xs t-text3 mt-1">Plans from <code>~/.claude/plans/</code></p>
         </div>
         <div>
+          <label class="t-label block text-sm mb-1">GitHub PR <span class="text-sm font-normal t-text3">(optional)</span></label>
+          <select id="task-pr" class="t-input w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500">
+            <option value="">— none —</option>
+          </select>
+          <p id="prs-status" class="text-xs t-text3 mt-1 hidden">Loading open PRs…</p>
+        </div>
+        <div>
           <label class="t-label block text-sm mb-2">Colour</label>
           <div class="flex items-center gap-2">
             <button type="button" onclick="setTaskColor(null)" id="color-none"
@@ -382,6 +389,27 @@
       populatePlanSelect(cur);
     }
 
+    async function populatePrSelect(selectedUrl = '') {
+      const sel = document.getElementById('task-pr');
+      const status = document.getElementById('prs-status');
+      sel.innerHTML = '<option value="">— none —</option>';
+      status.textContent = 'Loading open PRs…';
+      status.classList.remove('hidden');
+      try {
+        const prs = await fetch('/api/prs').then(r => r.json());
+        prs.forEach(pr => {
+          const opt = document.createElement('option');
+          opt.value = pr.url;
+          opt.textContent = `${pr.repository.name}#${pr.number} — ${pr.title}`;
+          if (pr.url === selectedUrl) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        status.classList.add('hidden');
+      } catch {
+        status.textContent = 'Could not load PRs.';
+      }
+    }
+
     async function saveTasks() {
       await fetch('/api/tasks', {
         method: 'POST',
@@ -464,6 +492,7 @@
     function cardHTML(task) {
       const hasPlan = !!task.planFile;
       const hasDir  = !!task.projectDir;
+      const hasPr   = !!task.prUrl;
       const dirLabel = task.projectDir ? (task.projectDir.split('/').filter(Boolean).pop() || task.projectDir) : '';
       const bgStyle = task.color && TASK_COLORS[task.color] ? `background:${TASK_COLORS[task.color]}33; border-color:${TASK_COLORS[task.color]}66;` : '';
       return `
@@ -486,6 +515,13 @@
               ${hasDir ? `📁 ${escHtml(dirLabel)}` : ''}
             </div>
             <div class="flex items-center gap-0.5 shrink-0">
+              ${hasPr ? `
+              <button title="Open PR" onclick="window.open('${task.prUrl}','_blank')"
+                class="t-icon-btn p-1 transition-colors hover:text-gray-400">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                </svg>
+              </button>` : ''}
               ${hasPlan ? `
               <button title="View plan" onclick="openPlan('${task.id}')"
                 class="t-icon-btn p-1 transition-colors hover:text-violet-500">
@@ -544,6 +580,7 @@
       document.getElementById('task-dir').value = '';
       plans = await fetchPlans();
       populatePlanSelect('');
+      populatePrSelect('');
       setTaskColor(null);
       document.getElementById('task-modal').classList.remove('hidden');
       document.getElementById('task-title').focus();
@@ -559,6 +596,7 @@
       document.getElementById('task-dir').value = task.projectDir || '';
       plans = await fetchPlans();
       populatePlanSelect(task.planFile || '');
+      populatePrSelect(task.prUrl || '');
       setTaskColor(task.color || null);
       document.getElementById('task-modal').classList.remove('hidden');
       document.getElementById('task-title').focus();
@@ -572,10 +610,11 @@
       const description = document.getElementById('task-desc').value.trim();
       const projectDir  = document.getElementById('task-dir').value.trim();
       const planFile    = document.getElementById('task-plan').value;
+      const prUrl       = document.getElementById('task-pr').value;
       if (editingTaskId) {
-        Object.assign(tasks.find(t => t.id === editingTaskId), { title, description, projectDir, planFile, color: currentTaskColor });
+        Object.assign(tasks.find(t => t.id === editingTaskId), { title, description, projectDir, planFile, prUrl, color: currentTaskColor });
       } else {
-        tasks.push({ id: crypto.randomUUID(), title, description, column: editingColumn, projectDir, planFile, color: currentTaskColor, createdAt: new Date().toISOString() });
+        tasks.push({ id: crypto.randomUUID(), title, description, column: editingColumn, projectDir, planFile, prUrl, color: currentTaskColor, createdAt: new Date().toISOString() });
       }
       await saveTasks(); closeTaskModal(); renderBoard();
     }

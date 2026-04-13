@@ -71,6 +71,18 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/tasks":
             self.send_json(read_tasks())
 
+        elif path == "/api/prs":
+            try:
+                result = subprocess.run(
+                    ['/bin/zsh', '-lc',
+                     'gh search prs --author @me --state open --limit 30 --json title,url,number,repository'],
+                    capture_output=True, text=True, timeout=10
+                )
+                prs = json.loads(result.stdout) if result.returncode == 0 else []
+            except Exception:
+                prs = []
+            self.send_json(prs)
+
         elif path == "/api/plans":
             if not PLANS_DIR.exists():
                 self.send_json([])
