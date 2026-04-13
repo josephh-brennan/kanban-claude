@@ -93,6 +93,41 @@ class Handler(BaseHTTPRequestHandler):
             content = plan_path.read_text()
             self.send_json({"content": content})
 
+        elif path == "/api/session":
+            plan_file = qs.get("planFile", [None])[0]
+            project_dir = qs.get("projectDir", [None])[0] or ""
+            if not plan_file:
+                self.send_json({"error": "missing planFile param"}, 400)
+                return
+            plan_name = Path(plan_file).name
+            project_dir = project_dir.replace("~", str(Path.home()))
+            projects_root = Path.home() / ".claude" / "projects"
+            this_board_key = str(BASE_DIR).replace("/", "-")
+            if not projects_root.exists():
+                self.send_json({"sessionId": None})
+                return
+
+            # Build expected project key from projectDir for scoring
+            task_key_parts = set(project_dir.strip("/").split("/"))
+
+            candidates = []
+            for jsonl in projects_root.glob("*/*.jsonl"):
+                proj_key = jsonl.parent.name
+                # Skip this kanban board's own sessions
+                if this_board_key in proj_key:
+                    continue
+                try:
+                    if plan_name in jsonl.read_text(errors="ignore"):
+                        # Score by how many path parts match the task's projectDir
+                        proj_parts = set(proj_key.strip("-").split("-"))
+                        score = len(task_key_parts & proj_parts)
+                        candidates.append((score, jsonl.stat().st_mtime, jsonl.stem))
+                except OSError:
+                    continue
+
+            best = max(candidates, default=(None, None, None))[2] if candidates else None
+            self.send_json({"sessionId": best})
+
         else:
             self.send_response(404)
             self.end_headers()
@@ -119,7 +154,7 @@ class Handler(BaseHTTPRequestHandler):
             # Expand ~ in the command string
             cmd = cmd.replace("~", str(Path.home()))
 
-            subprocess.Popen(cmd, shell=True)
+            subprocess.Popen(['/bin/zsh', '-lc', cmd])
             self.send_json({"ok": True})
 
         else:

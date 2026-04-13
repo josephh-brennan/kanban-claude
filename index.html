@@ -136,6 +136,7 @@
     .drag-over { outline:2px dashed #60a5fa; outline-offset:-2px; }
     .dragging { opacity:0.4; }
     .col-drop-target { min-height:2rem; }
+    .card-actions { opacity:1; }
   </style>
 </head>
 <body class="h-full flex flex-col overflow-hidden transition-colors duration-150">
@@ -265,10 +266,9 @@
             class="t-input w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none"></textarea>
           <div class="mt-2 flex flex-wrap gap-2">
             <span class="t-text3 text-xs self-center">Presets:</span>
-            <button onclick="setPreset(0)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Claude directly</button>
-            <button onclick="setPreset(1)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Zellij → Claude</button>
-            <button onclick="setPreset(2)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Zellij only</button>
-            <button onclick="setPreset(3)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">New window</button>
+            <button onclick="setPreset(0)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Zellij new tab + Claude</button>
+            <button onclick="setPreset(1)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Zellij floating pane + Claude</button>
+            <button onclick="setPreset(2)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Alacritty + Zellij</button>
           </div>
           <p class="t-text3 text-xs mt-1">Also available: <code class="t-text2 font-mono">{plan}</code> — full path to the linked plan file.</p>
         </div>
@@ -444,11 +444,13 @@
           draggable="true"
           ondragstart="onDragStart(event,'${task.id}')"
           ondragend="onDragEnd()">
-          <div class="flex items-start gap-2">
-            <div class="flex-1 min-w-0 cursor-pointer" onclick="onCardClick('${task.id}')">
-              <p class="t-text text-sm font-medium truncate">${escHtml(task.title)}</p>
-              ${task.description ? `<p class="t-text2 text-xs mt-0.5 line-clamp-2">${escHtml(task.description)}</p>` : ''}
-              ${hasDir ? `<p class="t-text3 text-xs font-mono mt-1 truncate">📁 ${escHtml(dirLabel)}</p>` : ''}
+          <div class="cursor-pointer" onclick="onCardClick('${task.id}')">
+            <p class="t-text text-sm font-semibold leading-snug">${escHtml(task.title)}</p>
+            ${task.description ? `<p class="t-text2 text-xs mt-1 line-clamp-2">${escHtml(task.description)}</p>` : ''}
+          </div>
+          <div class="card-actions flex items-center justify-between mt-2">
+            <div class="t-text3 text-xs font-mono truncate">
+              ${hasDir ? `📁 ${escHtml(dirLabel)}` : ''}
             </div>
             <div class="flex items-center gap-0.5 shrink-0">
               ${hasPlan ? `
@@ -570,12 +572,10 @@
     function closePlanModal() { document.getElementById('plan-modal').classList.add('hidden'); }
 
     // ── Settings ─────────────────────────────────────────────────────────────
-    const DEFAULT_CMD = 'alacritty msg create-window --working-directory {dir} -- zsh -c "claude; exec zsh"';
+    const DEFAULT_CMD = '/Applications/zellij run --cwd {dir} --name claude -- {claude}';
     const CMD_PRESETS = [
-      'alacritty msg create-window --working-directory {dir} -- zsh -c "claude; exec zsh"',
-      'alacritty msg create-window --working-directory {dir} -- zsh -c "zellij run -- claude; exec zsh"',
-      'alacritty msg create-window --working-directory {dir}',
-      'alacritty --working-directory {dir} -- zsh -c "claude; exec zsh"',
+      '/Applications/zellij run --cwd {dir} --name claude -- {claude}',
+      'alacritty msg create-window --working-directory {dir} -e zsh -lc "{claude}; exec zsh"',
     ];
 
     function loadSettings() {
@@ -626,15 +626,19 @@
       if (!task?.projectDir) return;
       const { terminalCmd = DEFAULT_CMD } = loadSettings();
 
-      // Resolve the directory
       const dir = task.projectDir;
 
-      // Build the claude invocation: if a plan file is linked, pass it
-      const claudeCmd = task.planFile
-        ? `claude --plan ~/.claude/plans/${task.planFile}`
-        : 'claude';
+      // Build claude invocation with --resume <sessionId> if we can find one
+      const CLAUDE = '/opt/Homebrew/bin/claude';
+      let claudeCmd = CLAUDE;
+      if (task.planFile) {
+        try {
+          const params = new URLSearchParams({ planFile: task.planFile, projectDir: dir });
+          const { sessionId } = await fetch(`/api/session?${params}`).then(r => r.json());
+          claudeCmd = sessionId ? `${CLAUDE} --resume ${sessionId}` : `${CLAUDE} --resume`;
+        } catch { claudeCmd = `${CLAUDE} --resume`; }
+      }
 
-      // Replace placeholders: {dir} and {claude}
       const cmd = terminalCmd
         .replace(/\{dir\}/g, dir)
         .replace(/\{claude\}/g, claudeCmd);
