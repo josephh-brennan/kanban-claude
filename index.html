@@ -220,6 +220,21 @@
           </select>
           <p id="plans-status" class="text-xs t-text3 mt-1">Plans from <code>~/.claude/plans/</code></p>
         </div>
+        <div>
+          <label class="t-label block text-sm mb-2">Colour</label>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="setTaskColor(null)" id="color-none"
+              class="w-6 h-6 rounded-full border-2 t-border t-card transition-all" title="None"></button>
+            <button type="button" onclick="setTaskColor('green')" id="color-green"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#22c55e" title="Green"></button>
+            <button type="button" onclick="setTaskColor('blue')" id="color-blue"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#3b82f6" title="Blue"></button>
+            <button type="button" onclick="setTaskColor('yellow')" id="color-yellow"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#eab308" title="Yellow"></button>
+            <button type="button" onclick="setTaskColor('red')" id="color-red"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#ef4444" title="Red"></button>
+          </div>
+        </div>
       </div>
       <div class="t-border flex justify-end gap-2 px-6 py-4 border-t">
         <button onclick="closeTaskModal()" class="t-cancel px-4 py-2 text-sm rounded-lg transition-colors">Cancel</button>
@@ -305,7 +320,6 @@
     const COLUMNS = [
       { id: 'todo',       label: 'Todo',        dot: '#94a3b8' },
       { id: 'inprogress', label: 'In Progress',  dot: '#3b82f6' },
-      { id: 'testing',    label: 'Testing',      dot: '#f59e0b' },
       { id: 'done',       label: 'Done',         dot: '#10b981' },
       { id: 'archive',    label: 'Archive',      dot: '#64748b', collapsible: true },
     ];
@@ -397,7 +411,7 @@
       const colTasks = tasks.filter(t => t.column === col.id);
       const expanded = col.collapsible ? archiveExpanded : true;
       const wrap = document.createElement('div');
-      wrap.className = 'flex flex-col w-72 shrink-0 h-full';
+      wrap.className = 'flex flex-col w-96 shrink-0 h-full';
       wrap.innerHTML = `
         <div class="flex items-center gap-2 mb-3 px-1">
           <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${col.dot}"></span>
@@ -434,16 +448,35 @@
       renderBoard();
     }
 
+    const TASK_COLORS = { green: '#22c55e', blue: '#3b82f6', yellow: '#eab308', red: '#ef4444' };
+    let currentTaskColor = null;
+
+    function setTaskColor(color) {
+      currentTaskColor = color;
+      ['none','green','blue','yellow','red'].forEach(c => {
+        const el = document.getElementById(`color-${c}`);
+        if (!el) return;
+        el.style.outline = (c === (color ?? 'none')) ? '2px solid var(--text2)' : '';
+        el.style.outlineOffset = '2px';
+      });
+    }
+
     function cardHTML(task) {
       const hasPlan = !!task.planFile;
       const hasDir  = !!task.projectDir;
       const dirLabel = task.projectDir ? (task.projectDir.split('/').filter(Boolean).pop() || task.projectDir) : '';
+      const bgStyle = task.color && TASK_COLORS[task.color] ? `background:${TASK_COLORS[task.color]}33; border-color:${TASK_COLORS[task.color]}66;` : '';
       return `
         <div id="card-${task.id}"
           class="card t-card border rounded-lg px-3 py-2.5 transition-colors select-none"
+          style="${bgStyle}"
           draggable="true"
           ondragstart="onDragStart(event,'${task.id}')"
-          ondragend="onDragEnd()">
+          ondragend="onDragEnd()"
+          ondragover="onCardDragOver(event,'${task.id}')"
+          ondragleave="onCardDragLeave(event)"
+          ondrop="onCardDrop(event,'${task.id}')"
+          >
           <div class="cursor-pointer" onclick="onCardClick('${task.id}')">
             <p class="t-text text-sm font-semibold leading-snug">${escHtml(task.title)}</p>
             ${task.description ? `<p class="t-text2 text-xs mt-1 line-clamp-2">${escHtml(task.description)}</p>` : ''}
@@ -511,6 +544,7 @@
       document.getElementById('task-dir').value = '';
       plans = await fetchPlans();
       populatePlanSelect('');
+      setTaskColor(null);
       document.getElementById('task-modal').classList.remove('hidden');
       document.getElementById('task-title').focus();
     }
@@ -525,6 +559,7 @@
       document.getElementById('task-dir').value = task.projectDir || '';
       plans = await fetchPlans();
       populatePlanSelect(task.planFile || '');
+      setTaskColor(task.color || null);
       document.getElementById('task-modal').classList.remove('hidden');
       document.getElementById('task-title').focus();
     }
@@ -538,9 +573,9 @@
       const projectDir  = document.getElementById('task-dir').value.trim();
       const planFile    = document.getElementById('task-plan').value;
       if (editingTaskId) {
-        Object.assign(tasks.find(t => t.id === editingTaskId), { title, description, projectDir, planFile });
+        Object.assign(tasks.find(t => t.id === editingTaskId), { title, description, projectDir, planFile, color: currentTaskColor });
       } else {
-        tasks.push({ id: crypto.randomUUID(), title, description, column: editingColumn, projectDir, planFile, createdAt: new Date().toISOString() });
+        tasks.push({ id: crypto.randomUUID(), title, description, column: editingColumn, projectDir, planFile, color: currentTaskColor, createdAt: new Date().toISOString() });
       }
       await saveTasks(); closeTaskModal(); renderBoard();
     }
@@ -572,9 +607,10 @@
     function closePlanModal() { document.getElementById('plan-modal').classList.add('hidden'); }
 
     // ── Settings ─────────────────────────────────────────────────────────────
-    const DEFAULT_CMD = '/Applications/zellij run --cwd {dir} --name claude -- {claude}';
+    const DEFAULT_CMD = '/Applications/zellij run --cwd {dir} --name claude --direction right -- {claude}';
     const CMD_PRESETS = [
-      '/Applications/zellij run --cwd {dir} --name claude -- {claude}',
+      '/Applications/zellij run --cwd {dir} --name claude --direction right -- {claude}',
+      '/Applications/zellij run --cwd {dir} --name claude --direction down -- {claude}',
       'alacritty msg create-window --working-directory {dir} -e zsh -lc "{claude}; exec zsh"',
     ];
 
@@ -628,10 +664,13 @@
 
       const dir = task.projectDir;
 
-      // Build claude invocation with --resume <sessionId> if we can find one
       const CLAUDE = '/opt/Homebrew/bin/claude';
       let claudeCmd = CLAUDE;
-      if (task.planFile) {
+
+      if (!task.planFile) {
+        claudeCmd = CLAUDE; // fresh session, user will link plan manually
+      } else {
+        // Resume the session that was working on this plan
         try {
           const params = new URLSearchParams({ planFile: task.planFile, projectDir: dir });
           const { sessionId } = await fetch(`/api/session?${params}`).then(r => r.json());
@@ -674,7 +713,7 @@
     }
     function onDragOver(event, colId) {
       event.preventDefault(); event.dataTransfer.dropEffect = 'move';
-      document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      document.querySelectorAll('[data-drop-col]').forEach(el => el.classList.remove('drag-over'));
       document.getElementById(`col-${colId}`)?.classList.add('drag-over');
     }
     function onDragLeave(event) {
@@ -689,6 +728,41 @@
       if (task && task.column !== colId) { task.column = colId; await saveTasks(); renderBoard(); }
       draggedId = null;
     }
+
+    // Card-level drag-over: highlight top/bottom half and reorder on drop
+    function onCardDragOver(event, targetId) {
+      if (!draggedId || draggedId === targetId) return;
+      event.preventDefault(); event.stopPropagation();
+      const card = document.getElementById(`card-${targetId}`);
+      if (!card) return;
+      const rect = card.getBoundingClientRect();
+      const below = event.clientY > rect.top + rect.height / 2;
+      card.style.borderTop    = below ? '' : '2px solid #60a5fa';
+      card.style.borderBottom = below ? '2px solid #60a5fa' : '';
+    }
+    function onCardDragLeave(event) {
+      event.currentTarget.style.borderTop = '';
+      event.currentTarget.style.borderBottom = '';
+    }
+    async function onCardDrop(event, targetId) {
+      event.preventDefault(); event.stopPropagation();
+      const card = document.getElementById(`card-${targetId}`);
+      if (card) { card.style.borderTop = ''; card.style.borderBottom = ''; }
+      if (!draggedId || draggedId === targetId) return;
+      const dragged = tasks.find(t => t.id === draggedId);
+      const target  = tasks.find(t => t.id === targetId);
+      if (!dragged || !target) return;
+      const rect = card?.getBoundingClientRect();
+      const insertAfter = rect && event.clientY > rect.top + rect.height / 2;
+      // Move dragged to same column as target, at the right position
+      dragged.column = target.column;
+      tasks.splice(tasks.indexOf(dragged), 1);
+      const newIdx = tasks.indexOf(target) + (insertAfter ? 1 : 0);
+      tasks.splice(newIdx, 0, dragged);
+      draggedId = null;
+      await saveTasks(); renderBoard();
+    }
+
 
     // ── Keyboard ─────────────────────────────────────────────────────────────
     document.addEventListener('keydown', e => {
