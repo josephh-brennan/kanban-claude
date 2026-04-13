@@ -243,7 +243,7 @@
       </div>
       <kbd class="text-xs t-text3 border t-border px-2 py-0.5 rounded">Esc</kbd>
     </div>
-    <div id="plan-content" class="prose overflow-y-auto flex-1 px-8 py-6 text-sm max-w-4xl mx-auto w-full"></div>
+    <div id="plan-content" class="prose overflow-y-auto flex-1 px-10 py-6 text-sm"></div>
   </div>
 
   <!-- ── Settings Modal ── -->
@@ -265,9 +265,10 @@
             class="t-input w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none"></textarea>
           <div class="mt-2 flex flex-wrap gap-2">
             <span class="t-text3 text-xs self-center">Presets:</span>
-            <button onclick="setPreset(0)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Alacritty + Zellij</button>
-            <button onclick="setPreset(1)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Alacritty + Claude</button>
-            <button onclick="setPreset(2)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">New window</button>
+            <button onclick="setPreset(0)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Claude directly</button>
+            <button onclick="setPreset(1)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Zellij → Claude</button>
+            <button onclick="setPreset(2)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">Zellij only</button>
+            <button onclick="setPreset(3)" class="text-xs px-2 py-1 rounded t-cancel transition-colors">New window</button>
           </div>
           <p class="t-text3 text-xs mt-1">Also available: <code class="t-text2 font-mono">{plan}</code> — full path to the linked plan file.</p>
         </div>
@@ -569,11 +570,12 @@
     function closePlanModal() { document.getElementById('plan-modal').classList.add('hidden'); }
 
     // ── Settings ─────────────────────────────────────────────────────────────
-    const DEFAULT_CMD = 'alacritty msg create-window --working-directory {dir}';
+    const DEFAULT_CMD = 'alacritty msg create-window --working-directory {dir} -- zsh -c "claude; exec zsh"';
     const CMD_PRESETS = [
-      'alacritty msg create-window --working-directory {dir}',
       'alacritty msg create-window --working-directory {dir} -- zsh -c "claude; exec zsh"',
-      'alacritty --working-directory {dir}',
+      'alacritty msg create-window --working-directory {dir} -- zsh -c "zellij run -- claude; exec zsh"',
+      'alacritty msg create-window --working-directory {dir}',
+      'alacritty --working-directory {dir} -- zsh -c "claude; exec zsh"',
     ];
 
     function loadSettings() {
