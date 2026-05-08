@@ -83,6 +83,13 @@ class Handler(BaseHTTPRequestHandler):
                 prs = []
             self.send_json(prs)
 
+        elif path == "/api/claudemd":
+            p = Path.home() / ".claude" / "CLAUDE.md"
+            if not p.exists():
+                self.send_json({"error": "CLAUDE.md not found"}, 404)
+                return
+            self.send_json({"content": p.read_text()})
+
         elif path == "/api/plans":
             if not PLANS_DIR.exists():
                 self.send_json([])
@@ -152,6 +159,21 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_body()
             tasks = json.loads(body)
             write_tasks(tasks)
+            self.send_json({"ok": True})
+
+        elif path == "/api/plan":
+            body = self.read_body()
+            data = json.loads(body)
+            filename = data.get("file", "")
+            content = data.get("content", "")
+            if not filename:
+                self.send_json({"error": "missing file"}, 400)
+                return
+            plan_path = PLANS_DIR / Path(filename).name
+            if not plan_path.exists():
+                self.send_json({"error": "plan not found"}, 404)
+                return
+            plan_path.write_text(content)
             self.send_json({"ok": True})
 
         elif path == "/api/open-terminal":

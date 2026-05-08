@@ -157,6 +157,10 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
       </svg>
     </button>
+    <button onclick="openClaudeMd()" title="View CLAUDE.md"
+      class="t-toggle flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors">
+      CLAUDE.md
+    </button>
     <button onclick="toggleTheme()"
       class="t-toggle flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors">
       <svg id="icon-sun" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -229,17 +233,27 @@
         </div>
         <div>
           <label class="t-label block text-sm mb-2">Colour</label>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center flex-wrap gap-2">
             <button type="button" onclick="setTaskColor(null)" id="color-none"
               class="w-6 h-6 rounded-full border-2 t-border t-card transition-all" title="None"></button>
-            <button type="button" onclick="setTaskColor('green')" id="color-green"
-              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#22c55e" title="Green"></button>
-            <button type="button" onclick="setTaskColor('blue')" id="color-blue"
-              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#3b82f6" title="Blue"></button>
-            <button type="button" onclick="setTaskColor('yellow')" id="color-yellow"
-              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#eab308" title="Yellow"></button>
             <button type="button" onclick="setTaskColor('red')" id="color-red"
               class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#ef4444" title="Red"></button>
+            <button type="button" onclick="setTaskColor('orange')" id="color-orange"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#f97316" title="Orange"></button>
+            <button type="button" onclick="setTaskColor('yellow')" id="color-yellow"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#eab308" title="Yellow"></button>
+            <button type="button" onclick="setTaskColor('green')" id="color-green"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#22c55e" title="Green"></button>
+            <button type="button" onclick="setTaskColor('teal')" id="color-teal"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#14b8a6" title="Teal"></button>
+            <button type="button" onclick="setTaskColor('blue')" id="color-blue"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#3b82f6" title="Blue"></button>
+            <button type="button" onclick="setTaskColor('violet')" id="color-violet"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#8b5cf6" title="Violet"></button>
+            <button type="button" onclick="setTaskColor('pink')" id="color-pink"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#ec4899" title="Pink"></button>
+            <button type="button" onclick="setTaskColor('gray')" id="color-gray"
+              class="w-6 h-6 rounded-full border-2 border-transparent transition-all" style="background:#94a3b8" title="Gray"></button>
           </div>
         </div>
       </div>
@@ -264,9 +278,18 @@
           <p id="plan-modal-file" class="text-xs t-text3 font-mono"></p>
         </div>
       </div>
-      <kbd class="text-xs t-text3 border t-border px-2 py-0.5 rounded">Esc</kbd>
+      <div class="flex items-center gap-2">
+        <button id="plan-edit-btn" onclick="togglePlanEdit()"
+          class="t-cancel px-3 py-1.5 text-sm rounded-lg border transition-colors">Edit</button>
+        <button id="plan-save-btn" onclick="savePlan()" style="display:none"
+          class="px-3 py-1.5 text-sm rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-medium transition-colors">Save</button>
+        <kbd class="text-xs t-text3 border t-border px-2 py-0.5 rounded">Esc</kbd>
+      </div>
     </div>
     <div id="plan-content" class="prose overflow-y-auto flex-1 px-10 py-6 text-sm"></div>
+    <textarea id="plan-editor"
+      class="hidden flex-1 w-full px-10 py-6 text-sm font-mono t-input bg-transparent resize-none focus:outline-none"
+      spellcheck="false"></textarea>
   </div>
 
   <!-- ── Settings Modal ── -->
@@ -327,6 +350,7 @@
     const COLUMNS = [
       { id: 'todo',       label: 'Todo',        dot: '#94a3b8' },
       { id: 'inprogress', label: 'In Progress',  dot: '#3b82f6' },
+      { id: 'ready',      label: 'Ready',        dot: '#a855f7' },
       { id: 'done',       label: 'Done',         dot: '#10b981' },
       { id: 'archive',    label: 'Archive',      dot: '#64748b', collapsible: true },
     ];
@@ -476,12 +500,12 @@
       renderBoard();
     }
 
-    const TASK_COLORS = { green: '#22c55e', blue: '#3b82f6', yellow: '#eab308', red: '#ef4444' };
+    const TASK_COLORS = { red: '#ef4444', orange: '#f97316', yellow: '#eab308', green: '#22c55e', teal: '#14b8a6', blue: '#3b82f6', violet: '#8b5cf6', pink: '#ec4899', gray: '#94a3b8' };
     let currentTaskColor = null;
 
     function setTaskColor(color) {
       currentTaskColor = color;
-      ['none','green','blue','yellow','red'].forEach(c => {
+      ['none','red','orange','yellow','green','teal','blue','violet','pink','gray'].forEach(c => {
         const el = document.getElementById(`color-${c}`);
         if (!el) return;
         el.style.outline = (c === (color ?? 'none')) ? '2px solid var(--text2)' : '';
@@ -623,6 +647,9 @@
     async function openPlan(taskId) {
       const task = tasks.find(t => t.id === taskId);
       if (!task?.planFile) return;
+      currentPlanFile = task.planFile;
+      setPlanEditMode(false);
+      document.getElementById('plan-edit-btn').style.display = '';
       document.getElementById('plan-modal-title').textContent = task.title;
       document.getElementById('plan-modal-file').textContent = task.planFile;
       document.getElementById('plan-content').innerHTML = '<p style="color:var(--text3);font-size:.875rem">Loading…</p>';
@@ -631,6 +658,7 @@
         const r = await fetch(`/api/plan?file=${encodeURIComponent(task.planFile)}`);
         if (!r.ok) { const b = await r.json().catch(()=>({})); throw new Error(b.error || `HTTP ${r.status}`); }
         const { content } = await r.json();
+        document.getElementById('plan-editor').dataset.raw = content;
         document.getElementById('plan-content').innerHTML = marked.parse(content);
         document.querySelectorAll('#plan-content pre code').forEach(el => hljs.highlightElement(el));
       } catch(err) {
@@ -643,7 +671,70 @@
       task?.planFile ? openPlan(taskId) : openEditModal(taskId);
     }
 
-    function closePlanModal() { document.getElementById('plan-modal').classList.add('hidden'); }
+    let currentPlanFile = null; // track which plan is open for saving
+
+    function closePlanModal() {
+      document.getElementById('plan-modal').classList.add('hidden');
+      setPlanEditMode(false);
+    }
+
+    function setPlanEditMode(editing) {
+      document.getElementById('plan-content').classList.toggle('hidden', editing);
+      document.getElementById('plan-editor').classList.toggle('hidden', !editing);
+      document.getElementById('plan-edit-btn').style.display = editing ? 'none' : '';
+      document.getElementById('plan-save-btn').style.display = editing ? '' : 'none';
+    }
+
+    function togglePlanEdit() {
+      const editor = document.getElementById('plan-editor');
+      const isEditing = !editor.classList.contains('hidden');
+      if (isEditing) {
+        // switching back to view — re-render
+        const content = editor.value;
+        document.getElementById('plan-content').innerHTML = marked.parse(content);
+        document.querySelectorAll('#plan-content pre code').forEach(el => hljs.highlightElement(el));
+      } else {
+        // switching to edit — populate textarea with raw markdown
+        editor.value = editor.dataset.raw || '';
+      }
+      setPlanEditMode(!isEditing);
+    }
+
+    async function savePlan() {
+      if (!currentPlanFile) return;
+      const content = document.getElementById('plan-editor').value;
+      try {
+        const r = await fetch('/api/plan', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: currentPlanFile, content }),
+        });
+        if (!r.ok) throw new Error();
+        // re-render and switch back to view
+        document.getElementById('plan-content').innerHTML = marked.parse(content);
+        document.querySelectorAll('#plan-content pre code').forEach(el => hljs.highlightElement(el));
+        document.getElementById('plan-editor').dataset.raw = content;
+        setPlanEditMode(false);
+      } catch {
+        alert('Failed to save plan.');
+      }
+    }
+
+    async function openClaudeMd() {
+      currentPlanFile = null;
+      setPlanEditMode(false);
+      document.getElementById('plan-edit-btn').style.display = 'none';
+      document.getElementById('plan-modal-title').textContent = 'CLAUDE.md';
+      document.getElementById('plan-modal-file').textContent = '~/.claude/CLAUDE.md';
+      document.getElementById('plan-content').innerHTML = '<p style="color:var(--text3);font-size:.875rem">Loading…</p>';
+      document.getElementById('plan-modal').classList.remove('hidden');
+      try {
+        const { content } = await fetch('/api/claudemd').then(r => r.json());
+        document.getElementById('plan-content').innerHTML = marked.parse(content);
+        document.querySelectorAll('#plan-content pre code').forEach(el => hljs.highlightElement(el));
+      } catch(err) {
+        document.getElementById('plan-content').innerHTML = `<p style="color:#ef4444;font-size:.875rem">Could not load CLAUDE.md</p>`;
+      }
+    }
 
     // ── Settings ─────────────────────────────────────────────────────────────
     const DEFAULT_CMD = '/Applications/zellij run --cwd {dir} --name claude --direction right -- {claude}';
