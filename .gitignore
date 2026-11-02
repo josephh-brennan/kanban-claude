@@ -1,0 +1,8 @@
+# Board data: plan snapshots, logs and other personal runtime state
+data/
+
+# Board task data (personal task titles and local project paths)
+tasks.json
+
+# Python bytecode
+__pycache__/

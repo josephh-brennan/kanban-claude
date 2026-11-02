@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Local server for Claude Code Kanban board."""
 
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
-import time
-from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -16,68 +16,10 @@ PORT = 8765
 BASE_DIR = Path(__file__).parent
 TASKS_FILE = BASE_DIR / "tasks.json"
 PLANS_DIR = Path.home() / ".claude" / "plans"
-
-MODEL_PRICING = {
-    'claude-opus-4-7':            {'input': 15.0,  'output': 75.0,  'cache_read': 1.50,  'cache_write': 18.75},
-    'claude-sonnet-4-6':          {'input': 3.0,   'output': 15.0,  'cache_read': 0.30,  'cache_write': 3.75},
-    'claude-haiku-4-5-20251001':  {'input': 0.80,  'output': 4.0,   'cache_read': 0.08,  'cache_write': 1.00},
-    'claude-opus-4-5-20251101':   {'input': 15.0,  'output': 75.0,  'cache_read': 1.50,  'cache_write': 18.75},
-    'claude-sonnet-4-5-20250929': {'input': 3.0,   'output': 15.0,  'cache_read': 0.30,  'cache_write': 3.75},
-    '_default':                   {'input': 3.0,   'output': 15.0,  'cache_read': 0.30,  'cache_write': 3.75},
-}
-
-_weekly_cache = {'data': None, 'ts': 0}
-
-
-def compute_session_cost(jsonl_path):
-    tokens = defaultdict(int)
-    model_counts = defaultdict(int)
-    session_date = None
-    try:
-        with open(jsonl_path, errors='ignore') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                # First timestamp in the file = session start date
-                if session_date is None:
-                    ts = msg.get('timestamp', '')
-                    if ts:
-                        session_date = ts[:10]  # 'YYYY-MM-DD'
-                if msg.get('type') != 'assistant':
-                    continue
-                message = msg.get('message', {})
-                model = message.get('model', '')
-                if model:
-                    model_counts[model] += 1
-                usage = message.get('usage', {})
-                tokens['input'] += usage.get('input_tokens', 0)
-                tokens['output'] += usage.get('output_tokens', 0)
-                tokens['cache_read'] += usage.get('cache_read_input_tokens', 0)
-                tokens['cache_write'] += usage.get('cache_creation_input_tokens', 0)
-    except OSError:
-        pass
-    primary_model = max(model_counts, key=model_counts.get) if model_counts else ''
-    pricing = MODEL_PRICING.get(primary_model, MODEL_PRICING['_default'])
-    cost = (
-        tokens['input'] * pricing['input'] / 1_000_000 +
-        tokens['output'] * pricing['output'] / 1_000_000 +
-        tokens['cache_read'] * pricing['cache_read'] / 1_000_000 +
-        tokens['cache_write'] * pricing['cache_write'] / 1_000_000
-    )
-    return {
-        'costUSD': round(cost, 4),
-        'inputTokens': tokens['input'],
-        'outputTokens': tokens['output'],
-        'cacheReadTokens': tokens['cache_read'],
-        'cacheWriteTokens': tokens['cache_write'],
-        'model': primary_model,
-        'sessionDate': session_date,
-    }
+# Board-owned copies of plans. Git-ignored. Filled by scripts/capture-plans.sh
+# (Claude Code hooks) and by snapshot_plan() on link and board edits.
+STORE_DIR = BASE_DIR / "data" / "plans"
+SNAPSHOT_HASH_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
 def read_tasks():
@@ -90,6 +32,66 @@ def read_tasks():
 def write_tasks(tasks):
     with open(TASKS_FILE, "w") as f:
         json.dump(tasks, f, indent=2)
+
+
+def utc_now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def snapshot_plan(src, source):
+    """Store the current bytes of src. Same content is stored once. Returns its metadata."""
+    content = src.read_bytes()
+    digest = hashlib.sha256(content).hexdigest()[:16]
+    meta_path = STORE_DIR / f"{digest}.json"
+    if meta_path.exists():
+        return json.loads(meta_path.read_text())
+    STORE_DIR.mkdir(parents=True, exist_ok=True)
+    # Content first, metadata last: the .json file is the commit marker.
+    md_tmp = STORE_DIR / f"{digest}.md.tmp"
+    md_tmp.write_bytes(content)
+    md_tmp.replace(STORE_DIR / f"{digest}.md")
+    meta = {"hash": digest, "name": src.name, "capturedAt": utc_now(), "source": source}
+    json_tmp = STORE_DIR / f"{digest}.json.tmp"
+    json_tmp.write_text(json.dumps(meta))
+    json_tmp.replace(meta_path)
+    return meta
+
+
+def latest_snapshot(name):
+    """Most recent snapshot captured under this plan filename, or None.
+
+    capturedAt has one-second resolution, so ties are broken by the metadata
+    file's mtime, which records the actual write order.
+    """
+    if not STORE_DIR.exists():
+        return None
+    matches = []
+    for p in STORE_DIR.glob("*.json"):
+        try:
+            meta = json.loads(p.read_text())
+            written = p.stat().st_mtime_ns
+        except (OSError, json.JSONDecodeError):
+            continue
+        if meta.get("name") == name:
+            matches.append((meta["capturedAt"], written, meta))
+    return max(matches, key=lambda m: (m[0], m[1]))[2] if matches else None
+
+
+def read_plan(name):
+    """Live plan if it still exists, otherwise the latest snapshot. None if neither."""
+    live = PLANS_DIR / name
+    if live.exists():
+        return {"content": live.read_text(), "source": "live"}
+    snap = latest_snapshot(name)
+    if snap:
+        snap_path = STORE_DIR / f"{snap['hash']}.md"
+        if SNAPSHOT_HASH_RE.match(snap["hash"]) and snap_path.exists():
+            return {
+                "content": snap_path.read_text(),
+                "source": "snapshot",
+                "capturedAt": snap["capturedAt"],
+            }
+    return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -169,13 +171,12 @@ class Handler(BaseHTTPRequestHandler):
             if not filename:
                 self.send_json({"error": "missing file param"}, 400)
                 return
-            # Safety: only allow .md files in the plans directory
-            plan_path = PLANS_DIR / Path(filename).name
-            if not plan_path.exists():
-                self.send_json({"error": "plan not found"}, 404)
+            # Safety: basename only, so the lookup stays inside the plans directory
+            plan = read_plan(Path(filename).name)
+            if plan is None:
+                self.send_json({"error": "plan not found and no snapshot was captured"}, 404)
                 return
-            content = plan_path.read_text()
-            self.send_json({"content": content})
+            self.send_json(plan)
 
         elif path == "/api/session":
             plan_file = qs.get("planFile", [None])[0]
@@ -186,9 +187,8 @@ class Handler(BaseHTTPRequestHandler):
             project_dir = project_dir.replace("~", str(Path.home()))
             projects_root = Path.home() / ".claude" / "projects"
             this_board_key = str(BASE_DIR).replace("/", "-")
-            _empty = {'costUSD': 0, 'inputTokens': 0, 'outputTokens': 0, 'cacheReadTokens': 0, 'cacheWriteTokens': 0, 'model': ''}
             if not projects_root.exists():
-                self.send_json({"sessionId": None, **_empty})
+                self.send_json({"sessionId": None})
                 return
 
             task_key_parts = set(project_dir.strip("/").split("/")) if project_dir else set()
@@ -223,74 +223,11 @@ class Handler(BaseHTTPRequestHandler):
                         continue
 
             if not candidates:
-                self.send_json({"sessionId": None, **_empty})
+                self.send_json({"sessionId": None})
                 return
 
             best = max(candidates, key=lambda x: (x[0], x[1]))
-            cost_data = compute_session_cost(best[3])
-            self.send_json({"sessionId": best[2], **cost_data})
-
-        elif path == "/api/weekly-stats":
-            now = time.time()
-            if now - _weekly_cache['ts'] < 300 and _weekly_cache['data'] is not None:
-                self.send_json(_weekly_cache['data'])
-                return
-
-            projects_root = Path.home() / ".claude" / "projects"
-            this_board_key = str(BASE_DIR).replace("/", "-")
-            mtime_cutoff = now - 7 * 24 * 3600
-            cutoff_date = datetime.fromtimestamp(mtime_cutoff).strftime('%Y-%m-%d')
-            by_day = defaultdict(lambda: {'costUSD': 0.0, 'sessions': 0, 'inputTokens': 0, 'outputTokens': 0, 'cacheReadTokens': 0, 'cacheWriteTokens': 0})
-            by_model = defaultdict(lambda: {'costUSD': 0.0, 'inputTokens': 0, 'outputTokens': 0, 'cacheReadTokens': 0, 'cacheWriteTokens': 0})
-
-            if projects_root.exists():
-                for jsonl in projects_root.glob("*/*.jsonl"):
-                    if this_board_key in jsonl.parent.name:
-                        continue
-                    try:
-                        # mtime pre-filter: sessionDate <= mtime, so skip if mtime is old
-                        if jsonl.stat().st_mtime < mtime_cutoff:
-                            continue
-                        cd = compute_session_cost(jsonl)
-                        date_str = cd.get('sessionDate') or datetime.fromtimestamp(jsonl.stat().st_mtime).strftime('%Y-%m-%d')
-                        # Filter by actual session start date, not mtime
-                        if date_str < cutoff_date:
-                            continue
-                        by_day[date_str]['costUSD'] += cd['costUSD']
-                        by_day[date_str]['sessions'] += 1
-                        by_day[date_str]['inputTokens'] += cd['inputTokens']
-                        by_day[date_str]['outputTokens'] += cd['outputTokens']
-                        by_day[date_str]['cacheReadTokens'] += cd['cacheReadTokens']
-                        by_day[date_str]['cacheWriteTokens'] += cd['cacheWriteTokens']
-                        if cd['model']:
-                            by_model[cd['model']]['costUSD'] += cd['costUSD']
-                            by_model[cd['model']]['inputTokens'] += cd['inputTokens']
-                            by_model[cd['model']]['outputTokens'] += cd['outputTokens']
-                            by_model[cd['model']]['cacheReadTokens'] += cd['cacheReadTokens']
-                            by_model[cd['model']]['cacheWriteTokens'] += cd['cacheWriteTokens']
-                    except OSError:
-                        continue
-
-            by_day_list = sorted(
-                [{'date': k, **{kk: (round(vv, 4) if kk == 'costUSD' else vv) for kk, vv in v.items()}} for k, v in by_day.items()],
-                key=lambda x: x['date']
-            )
-            by_model_dict = {
-                m: {kk: (round(vv, 4) if kk == 'costUSD' else vv) for kk, vv in v.items()}
-                for m, v in by_model.items()
-            }
-            week_total = {
-                'costUSD': round(sum(d['costUSD'] for d in by_day_list), 4),
-                'sessions': sum(d['sessions'] for d in by_day_list),
-                'inputTokens': sum(d['inputTokens'] for d in by_day_list),
-                'outputTokens': sum(d['outputTokens'] for d in by_day_list),
-                'cacheReadTokens': sum(d['cacheReadTokens'] for d in by_day_list),
-                'cacheWriteTokens': sum(d['cacheWriteTokens'] for d in by_day_list),
-            }
-            result = {'weekTotal': week_total, 'byDay': by_day_list, 'byModel': by_model_dict}
-            _weekly_cache['data'] = result
-            _weekly_cache['ts'] = now
-            self.send_json(result)
+            self.send_json({"sessionId": best[2]})
 
         else:
             self.send_response(404)
@@ -319,7 +256,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "plan not found"}, 404)
                 return
             plan_path.write_text(content)
+            # Snapshot the edit now, so it survives even if the live file is removed before the next hook run
+            snapshot_plan(plan_path, "board-edit")
             self.send_json({"ok": True})
+
+        elif path == "/api/plan/capture":
+            # Called when a plan is linked to a task: make sure its current content is stored
+            data = json.loads(self.read_body())
+            filename = Path(data.get("file", "")).name
+            if not filename:
+                self.send_json({"error": "missing file"}, 400)
+                return
+            live = PLANS_DIR / filename
+            if live.exists():
+                meta = snapshot_plan(live, "link")
+                self.send_json({"captured": True, "capturedAt": meta["capturedAt"]})
+                return
+            snap = latest_snapshot(filename)
+            self.send_json({"captured": snap is not None, "capturedAt": snap["capturedAt"] if snap else None})
 
         elif path == "/api/open-terminal":
             body = self.read_body()
